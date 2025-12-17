@@ -2,8 +2,6 @@ const vscode = require("vscode");
 const { execSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
-const output = vscode.window.createOutputChannel("DBT Lineage Debug");
-output.show(true);
 function activate(context) {
   const command = vscode.commands.registerCommand(
     "dbtLineage.show",
@@ -20,11 +18,8 @@ function activate(context) {
       const workspaceRoot =
         vscode.workspace.workspaceFolders[0].uri.fsPath;
 
-        output.appendLine("Workspace root: " + workspaceRoot);
-
 
       // 2. Ask for model name
-      output.appendLine("Command triggered");
 
       const model = await vscode.window.showInputBox({
         prompt: "Enter dbt model name"
@@ -52,8 +47,6 @@ function activate(context) {
       }
 
       // 4. Execute Python (cwd = dbt project root)
-      output.appendLine("Running l.py for model: " + model);
-      output.appendLine("Python script path: " + pythonScript);
       let result;
       try {
         result = execSync(
@@ -70,10 +63,7 @@ function activate(context) {
         return;
       }
 
-      output.appendLine("Raw Python output:");
-      output.appendLine(result);
 
-      output.appendLine("Opening lineage webview");
 
       const panel = vscode.window.createWebviewPanel(
       "dbtLineage",
@@ -93,7 +83,6 @@ function activate(context) {
         return;
       }
 
-      output.appendLine("Parsed lineage JSON successfully");
 
       panel.webview.onDidReceiveMessage(msg => {
         if (msg && msg.type === "ready") {
@@ -201,7 +190,11 @@ function getHtml(webview, extensionUri) {
                 }
               }
             ],
-            layout: { name: "breadthfirst", directed: true }
+            layout: {
+              name: "breadthfirst",
+              directed: true,
+              transform: (node, pos) => ({ x: pos.y, y: pos.x })
+            } 
           });
 
           cy.on("tap", "node", evt => {
