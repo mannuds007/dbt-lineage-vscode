@@ -1,10 +1,19 @@
 {
   "name": "dbt-lineage-local",
   "displayName": "DBT Lineage (Local)",
-  "version": "0.0.1",
-  "engines": { "vscode": "^1.85.0" },
-  "activationEvents": ["command:dbtLineage.show"],
-  "main": "extension.js",
+  "version": "0.1.0",
+  "description": "Local dbt model lineage viewer using manifest.json",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mannuds007/dbt-lineage-vscode.git"
+  },
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onCommand:dbtLineage.show"
+  ],
   "contributes": {
     "commands": [
       {
