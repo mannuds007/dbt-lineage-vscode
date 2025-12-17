@@ -1,1 +1,0 @@
-# dbt-lineage-vscode
