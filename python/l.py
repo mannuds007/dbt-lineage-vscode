@@ -38,28 +38,42 @@ def main():
         fail(f"Model '{model_name}' not found in manifest")
 
     upstream = []
+
+    # ---------- UPSTREAM ----------
     for parent_id in node.get("depends_on", {}).get("nodes", []):
-        parent = manifest["nodes"].get(parent_id)
-        if parent and parent.get("resource_type") == "model":
+
+        # models / seeds
+        parent = manifest.get("nodes", {}).get(parent_id)
+        if parent and parent.get("resource_type") in {"model", "seed"}:
             upstream.append({
                 "name": parent["name"],
-                "path": parent["original_file_path"]
+                "path": parent.get("original_file_path")
+            })
+            continue
+
+        # sources
+        source = manifest.get("sources", {}).get(parent_id)
+        if source:
+            upstream.append({
+                "name": f"{source['source_name']}.{source['name']}",
+                "path": source.get("original_file_path")
             })
 
+    # ---------- DOWNSTREAM (models only) ----------
     downstream = []
-    for other_id, other in manifest["nodes"].items():
+    for other_id, other in manifest.get("nodes", {}).items():
         if other.get("resource_type") != "model":
             continue
         if node_id in other.get("depends_on", {}).get("nodes", []):
             downstream.append({
                 "name": other["name"],
-                "path": other["original_file_path"]
+                "path": other.get("original_file_path")
             })
 
     output = {
         "current": {
             "name": node["name"],
-            "path": node["original_file_path"]
+            "path": node.get("original_file_path")
         },
         "upstream": upstream,
         "downstream": downstream
