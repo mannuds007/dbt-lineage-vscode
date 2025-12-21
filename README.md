@@ -4,23 +4,16 @@ A dbt local cli VS Code extension that visualizes **1-step upstream and downstre
 
 ## Installation
 
-1. Clone the repository:
+1. Download the extension package:
 
-   ```bash
-   git clone https://github.com/mannuds007/dbt-lineage-vscode.git
-   cd dbt-lineage-vscode
-   ```
-2. Package the extension:
-
-   ```bash
-   vsce package
-   ```
-3. Install locally:
+  Extension: https://github.com/mannuds007/dbt-lineage-vscode/dbt-lineage-local-0.1.1.vsix
+  
+2. Install locally:
 
    ```bash
    code --install-extension dbt-lineage-local-0.1.1.vsix --force
    ```
-4. Restart VS Code.
+3. Restart VS Code.
 
 ---
 
