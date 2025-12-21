@@ -6,7 +6,7 @@ A dbt local cli VS Code extension that visualizes **1-step upstream and downstre
 
 1. Download the extension package:
 
-  Extension: [https://github.com/mannuds007/dbt-lineage-vscode/dbt-lineage-local-0.1.1.vsix](https://github.com/mannuds007/dbt-lineage-vscode/blob/main/dbt-lineage-local-0.1.1.vsix)
+  Extension: [dbt-lineage-local-0.1.1.vsix](https://github.com/mannuds007/dbt-lineage-vscode/blob/main/dbt-lineage-local-0.1.1.vsix)
   
 2. Install locally:
 
