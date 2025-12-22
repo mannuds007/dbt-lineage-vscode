@@ -11,9 +11,6 @@
     "vscode": "^1.80.0"
   },
   "main": "./extension.js",
-  "activationEvents": [
-    "onCommand:dbtLineage.show"
-  ],
   "contributes": {
     "commands": [
       {
