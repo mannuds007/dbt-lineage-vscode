@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none';
+                 script-src {{cspSource}} 'nonce-{{nonce}}';
+                 style-src {{cspSource}} 'unsafe-inline';">
+  <style>
+    html, body, #cy {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      background: #1e1e1e;
+    }
+  </style>
+</head>
+<body>
+  <div id="cy"></div>
+
+  <script src="{{cytoscapeUri}}"></script>
+  <script nonce="{{nonce}}">
+    const vscode = acquireVsCodeApi();
+    let cy;
+
+    function render(data) {
+      if (!data || !data.current) return;
+
+      const elements = [];
+      const nodeIds = new Set();
+
+      function addNode(node, type) {
+        if (!nodeIds.has(node.name)) {
+          nodeIds.add(node.name);
+          elements.push({
+            data: {
+              id: node.name,
+              filePath: node.path,
+              type: type
+            }
+          });
+        }
+      }
+
+      // 1. Build Graph Data
+      addNode(data.current, 'current');
+
+      (data.upstream || []).forEach(u => {
+        addNode(u, 'upstream');
+        elements.push({ data: { source: u.name, target: data.current.name } });
+      });
+
+      (data.downstream || []).forEach(d => {
+        addNode(d, 'downstream');
+        elements.push({ data: { source: data.current.name, target: d.name } });
+      });
+
+      // 2. Define Layout Options with the 'stop' hook
+      const layoutOptions = {
+        name: "breadthfirst",
+        directed: true,
+        padding: 60,
+        spacingFactor: 1.1,
+        transform: (node, pos) => ({ x: pos.y, y: pos.x }), // Rotate to Left-to-Right
+        stop: function() {
+          // This runs after layout positions are calculated
+          updateEdgeCurves();
+        }
+      };
+
+      // 3. Initialize or Update Cy
+      if (cy) {
+        cy.elements().remove();
+        cy.add(elements);
+        cy.layout(layoutOptions).run();
+      } else {
+        cy = cytoscape({
+          container: document.getElementById("cy"),
+          elements,
+          style: [
+            {
+              selector: "node",
+              style: {
+                label: "data(id)",
+                shape: "round-rectangle",
+                width: "label",
+                padding: "12px",
+                "background-color": "#252526",
+                "border-width": 2,
+                "border-color": "#555",
+                color: "#cccccc",
+                "font-size": "13px",
+                "text-valign": "center",
+                "text-halign": "center",
+                "font-family": "Segoe UI, sans-serif"
+              }
+            },
+            {
+              selector: "node[type='current']",
+              style: {
+                "background-color": "#007acc",
+                "color": "#ffffff",
+                "border-color": "#ffffff",
+                "font-weight": "bold"
+              }
+            },
+            {
+              selector: "edge",
+              style: {
+                width: 2,
+                "line-color": "#a6a6a6",
+                "opacity": 0.8,
+                "target-arrow-shape": "triangle",
+                "target-arrow-color": "#a6a6a6",
+                "arrow-scale": 1,
+
+                // Default (will be set precisely per-edge by updateEdgeCurves)
+                "curve-style": "unbundled-bezier",
+                "control-point-weights": "0.2 0.8",
+                "control-point-distances": "-12 12"
+              }
+            }
+          ],
+          layout: layoutOptions
+        });
+
+        // Add interaction handlers
+        cy.on("dbltap", "node", evt => {
+          const filePath = evt.target.data("filePath");
+          if (filePath) {
+            vscode.postMessage({ openFile: filePath.replace(/\\\\/g, "/") });
+          }
+        });
+
+        // Re-calculate curves in real-time while dragging nodes
+        cy.on("drag", "node", updateEdgeCurves);
+
+        // Ensure curves are set after initial render completes
+        cy.ready(function() {
+          setTimeout(updateEdgeCurves, 0);
+        });
+      }
+    }
+
+    // --- Dynamic Curve Logic ---
+    function updateEdgeCurves() {
+      if (!cy) return;
+
+      cy.edges().forEach(edge => {
+        const src = edge.source().position();
+        const tgt = edge.target().position();
+        const dx = tgt.x - src.x;
+        const dy = tgt.y - src.y;
+
+        // Calculate edge length
+        const edgeLength = Math.sqrt(dx * dx + dy * dy);
+        
+        // When nearly horizontal, use straight line
+        if (Math.abs(dy) < 15) {
+          edge.style({
+            'curve-style': 'straight'
+          });
+          return;
+        }
+
+        // For very short edges, use simple bezier to avoid folding
+        if (edgeLength < 200) {
+          edge.style({
+            'curve-style': 'bezier'
+          });
+          return;
+        }
+
+        // Scale strength based on both dy and edge length
+        // Use smaller percentage for shorter edges
+        const lengthFactor = Math.min(1, edgeLength / 200);
+        const rawStrength = Math.abs(dy) / 6;
+        const maxStrength = edgeLength * 0.1 * lengthFactor; // Scales down for short edges
+        const strength = Math.max(8, Math.min(maxStrength, rawStrength));
+
+        // Curve direction based on vertical relationship
+        const sign = dy >= 0 ? 1 : -1;
+
+        edge.style({
+          'curve-style': 'unbundled-bezier',
+          'control-point-weights': '0.3 0.7',
+          'control-point-distances': `${-strength * sign} ${strength * sign}`
+        });
+      });
+}
+
+
+    window.addEventListener("message", event => {
+      render(event.data);
+    });
+  </script>
+</body>
+</html>
