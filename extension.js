@@ -1,12 +1,11 @@
 const vscode = require("vscode");
-const { execSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 
 let lineagePanel; // Reusable panel reference
 
 function activate(context) {
-  // 1. The Command to Open/Show Lineage
+  // 1. Command: Show Lineage
   const command = vscode.commands.registerCommand("dbtLineage.show", async () => {
     if (!vscode.workspace.workspaceFolders) {
       vscode.window.showErrorMessage("Please open a dbt project folder first.");
@@ -17,34 +16,23 @@ function activate(context) {
     const editor = vscode.window.activeTextEditor;
 
     if (!editor) {
-      // vscode.window.showErrorMessage("No active file found.");
+      vscode.window.showErrorMessage("No active file found.");
       return;
     }
 
-    const activeFilePath = editor.document.uri.fsPath;
-    
-    // Create/Show Panel
     ensurePanel(context, workspaceRoot);
-
-    // Initial Render
-    updateLineageGraph(activeFilePath, workspaceRoot, context);
+    updateLineageGraph(editor.document.uri.fsPath, workspaceRoot, context);
   });
 
   context.subscriptions.push(command);
 
-  // 2. EVENT LISTENER: Update graph when switching files in Explorer/Tabs
+  // 2. Event: Switch File (Auto-Update)
   vscode.window.onDidChangeActiveTextEditor((editor) => {
-    // Only update if the panel exists and is actually visible
     if (editor && lineagePanel && lineagePanel.visible) {
-      
       const doc = editor.document;
-      
-      // Ensure it's a file on disk (not an output log or git diff)
       if (doc.uri.scheme === 'file') {
-        
-        // Find the workspace folder for this specific file
         const wsFolder = vscode.workspace.getWorkspaceFolder(doc.uri);
-        const rootPath = wsFolder ? wsFolder.uri.fsPath : (vscode.workspace.workspaceFolders ? vscode.workspace.workspaceFolders[0].uri.fsPath : null);
+        const rootPath = wsFolder ? wsFolder.uri.fsPath : vscode.workspace.workspaceFolders?.[0].uri.fsPath;
 
         if (rootPath) {
           updateLineageGraph(doc.uri.fsPath, rootPath, context);
@@ -76,7 +64,7 @@ function ensurePanel(context, workspaceRoot) {
   try {
     lineagePanel.webview.html = getHtml(lineagePanel.webview, context.extensionUri);
   } catch (e) {
-    vscode.window.showErrorMessage(e.message || "Failed to load webview.html");
+    vscode.window.showErrorMessage("Failed to load webview: " + e.message);
     lineagePanel.dispose();
     lineagePanel = undefined;
     return;
@@ -86,15 +74,11 @@ function ensurePanel(context, workspaceRoot) {
     lineagePanel = undefined;
   });
 
-  // Handle Double Click from Webview
   lineagePanel.webview.onDidReceiveMessage((msg) => {
     if (msg?.openFile) {
       const absPath = path.join(workspaceRoot, msg.openFile);
-      
       vscode.workspace.openTextDocument(vscode.Uri.file(absPath)).then(doc => {
         vscode.window.showTextDocument(doc);
-        // Note: The onDidChangeActiveTextEditor listener above will catch this open event 
-        // and trigger the update, but we call it here to be instant.
         updateLineageGraph(absPath, workspaceRoot, context);
       });
     }
@@ -104,60 +88,122 @@ function ensurePanel(context, workspaceRoot) {
 function updateLineageGraph(filePath, workspaceRoot, context) {
   if (!lineagePanel) return;
 
-  // Basic Validation: Skip non-dbt files silently
-  if (!filePath.endsWith(".sql") && !filePath.endsWith(".yml")) {
-    return; 
-  }
+  // 1. Validation
+  if (!filePath.endsWith(".sql") && !filePath.endsWith(".yml")) return;
 
-  // Extract Model Name
   const modelName = path.basename(filePath, path.extname(filePath));
+  
+  if (!fs.existsSync(path.join(workspaceRoot, "dbt_project.yml"))) return;
 
-  // Check dbt project exists
-  if (!fs.existsSync(path.join(workspaceRoot, "dbt_project.yml"))) {
-    return;
-  }
-
-  const pythonScript = path.join(context.extensionUri.fsPath, "python", "l.py");
-  if (!fs.existsSync(pythonScript)) {
-    vscode.window.showErrorMessage("l.py not found inside extension.");
-    return;
-  }
-
+  // 2. Pure JS Lineage Generation (No Python)
   try {
-    const cmd = `python "${pythonScript}" "${modelName}"`;
+    const lineageData = generateLineage(workspaceRoot, modelName);
     
-    const result = execSync(cmd, {
-      cwd: workspaceRoot,
-      encoding: "utf-8",
-    });
-
-    const lineageData = JSON.parse(result);
+    if (!lineageData) {
+        // Silent return if model not found (likely a source or seed)
+        return; 
+    }
 
     lineagePanel.title = `Lineage: ${modelName}`;
     lineagePanel.webview.postMessage(lineageData);
 
   } catch (e) {
-    // --- SILENT ERROR HANDLING FOR SOURCES ---
-    const output = e.stdout ? e.stdout.toString() : "";
-    const stderr = e.stderr ? e.stderr.toString() : "";
-    const fullMessage = output + stderr + e.message;
-
-    if (fullMessage.includes("not found") && fullMessage.includes("Model")) {
-      // Silent return for sources/seeds
-      return; 
+    // Show error only if it's a system error (e.g. missing manifest), not a logic error
+    if (e.message.includes("manifest.json")) {
+        vscode.window.showErrorMessage(e.message);
+    } else {
+        console.error("Lineage extraction failed:", e);
     }
-
-    vscode.window.showErrorMessage("Lineage Error: " + (stderr || e.message));
   }
+}
+
+// --- NATIVE JS LOGIC (Replaces l.py) ---
+function generateLineage(projectRoot, modelName) {
+  const manifestPath = path.join(projectRoot, "target", "manifest.json");
+
+  if (!fs.existsSync(manifestPath)) {
+    throw new Error("target/manifest.json not found. Run 'dbt compile' or 'dbt build' first.");
+  }
+
+  // Read and Parse JSON
+  const manifestStr = fs.readFileSync(manifestPath, "utf-8");
+  const manifest = JSON.parse(manifestStr);
+
+  const nodes = manifest.nodes || {};
+  const sources = manifest.sources || {};
+
+  // 1. Find Current Node
+  let currentNodeId = null;
+  let currentNode = null;
+
+  // Search in 'nodes' (models, seeds, tests)
+  for (const [key, node] of Object.entries(nodes)) {
+    if (node.resource_type === 'model' && node.name === modelName) {
+      currentNodeId = key;
+      currentNode = node;
+      break;
+    }
+  }
+
+  if (!currentNode) {
+    // If not found in models, we stop (Sources/Seeds don't have standard upstream lineage)
+    return null;
+  }
+
+  // 2. Upstream Dependencies
+  const upstream = [];
+  const parentIds = (currentNode.depends_on && currentNode.depends_on.nodes) ? currentNode.depends_on.nodes : [];
+
+  parentIds.forEach(parentId => {
+    // Check if it's a node (Model/Seed)
+    if (nodes[parentId]) {
+      const p = nodes[parentId];
+      if (['model', 'seed'].includes(p.resource_type)) {
+        upstream.push({
+          name: p.name,
+          path: p.original_file_path
+        });
+      }
+    } 
+    // Check if it's a Source
+    else if (sources[parentId]) {
+      const s = sources[parentId];
+      upstream.push({
+        name: `${s.source_name}.${s.name}`,
+        path: s.original_file_path // Sources define path to .yml usually
+      });
+    }
+  });
+
+  // 3. Downstream Dependencies
+  // We must iterate all nodes to see if *they* depend on *us*
+  const downstream = [];
+  for (const node of Object.values(nodes)) {
+    if (node.resource_type !== 'model') continue;
+
+    const deps = (node.depends_on && node.depends_on.nodes) ? node.depends_on.nodes : [];
+    if (deps.includes(currentNodeId)) {
+      downstream.push({
+        name: node.name,
+        path: node.original_file_path
+      });
+    }
+  }
+
+  return {
+    current: {
+      name: currentNode.name,
+      path: currentNode.original_file_path
+    },
+    upstream: upstream,
+    downstream: downstream
+  };
 }
 
 // --- TEMPLATE LOADERS ---
 
 function loadWebviewTemplate(extensionUri) {
   const templatePath = path.join(extensionUri.fsPath, "webview.html");
-  if (!fs.existsSync(templatePath)) {
-    throw new Error("webview.html not found inside extension.");
-  }
   return fs.readFileSync(templatePath, "utf-8");
 }
 
@@ -167,8 +213,8 @@ function getHtml(webview, extensionUri) {
   );
   
   const nonce = getNonce();
-
   let html = loadWebviewTemplate(extensionUri);
+  
   html = html
     .replace(/\{\{cspSource\}\}/g, webview.cspSource)
     .replace(/\{\{nonce\}\}/g, nonce)
