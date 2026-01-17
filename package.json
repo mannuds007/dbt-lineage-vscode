@@ -1,7 +1,7 @@
 {
   "name": "dbt-lineage-local",
   "displayName": "DBT Lineage (Local)",
-  "version": "0.1.2",
+  "version": "1.0.0",
   "description": "Local dbt model lineage viewer using manifest.json",
   "repository": {
     "type": "git",
@@ -15,8 +15,11 @@
     "commands": [
       {
         "command": "dbtLineage.show",
-        "title": "Show dbt Lineage (1-step)"
+        "title": "Show dbt Lineage"
       }
     ]
+  },
+  "dependencies": {
+    "vsce": "^2.15.0"
   }
 }
